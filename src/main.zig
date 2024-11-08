@@ -266,48 +266,74 @@ fn isPresent(code:ArrayList(bool), codes:ArrayList(ArrayList(bool))) !usize {
     return NotFoundError.NotFound;
 }
 
+fn delveParent(word: *const ParentWord, value_raw: u1, bit_reader: anytype, alloc: anytype) !u8 {
+    if (value_raw == 0) {
+        const next_name = try name(word.child0, alloc);
+        if (next_name.items.len == 1 ) {
+            return next_name.items[0];
+        } else {
+            const new_word: Word = word.child0.*;
+            return delve(&new_word, bit_reader, alloc);
+        }
+    } else {
+        const next_name = try name(word.child1, alloc);
+        if (next_name.items.len == 1 ) {
+            return next_name.items[0];
+        } else {
+            const new_word: Word = word.child1.*;
+            return delve(&new_word, bit_reader, alloc);
+        }
+    }
+}
+
+fn delveSource(word: *const SourceWord, value_raw: u1, bit_reader: anytype, alloc: anytype) !u8 {
+    if (value_raw == 0) {
+        const next_name = try name(word.child0, alloc);
+        if (next_name.items.len == 1 ) {
+            return next_name.items[0];
+        } else {
+            const new_word: Word = word.child0.*;
+            return delve(&new_word, bit_reader, alloc);
+        }
+    } else {
+        const next_name = try name(word.child1, alloc);
+        if (next_name.items.len == 1 ) {
+            return next_name.items[0];
+        } else {
+            const new_word: Word = word.child1.*;
+            return delve(&new_word, bit_reader, alloc);
+        }
+    }
+}
+fn delve(word: *const Word, bit_reader: anytype, alloc: anytype) anyerror!u8 {
+    const value_raw = bit_reader.*.readBitsNoEof(u1, 1) catch |err| {
+        if (err == error.EndOfStream) {
+            const curr_name = try name(word, alloc);
+            if (curr_name.items.len != 0) {
+                std.debug.print("Some items have been discarded !!!", .{});
+                return 1;
+            } else {
+                return 0;
+            }
+        }
+        return err;
+    };
+    const actualWord = word.*;
+    switch (actualWord) {
+        .pure => |_| return NotFoundError.NotFound,
+        .parent => |w| return delveParent(&w, value_raw, bit_reader, alloc),
+        .source => |w| return delveSource(&w, value_raw, bit_reader, alloc),
+    }
+}
+
 fn readData(bit_reader:anytype, out:*ArrayList(u8), _:ArrayList(ArrayList(bool)),
     _:ArrayList(u8), source:*const SourceWord, fileLength:u64, alloc:std.mem.Allocator) !void {
     var read_chars: u64 = 0;
     var current_node: Word = .{.source = source.*};
     while (read_chars < fileLength) {
-        const value_raw = bit_reader.*.readBitsNoEof(u1, 1) catch |err| {
-            if (err == error.EndOfStream) {
-                const curr_name = try name(&current_node, alloc);
-                if (curr_name.items.len != 0) {
-                    std.debug.print("Some items have been discarded !!!", .{});
-                    return;
-                } else {
-                    return;
-                }
-            }
-            return;
-        };
-        const curr_name = try name(&current_node, alloc);
-        if (curr_name.items.len == 1) {
-            try out.append(curr_name.items[0]);
-            read_chars += 1;
-            current_node = .{ .source = source.* };
-        }
-        if (value_raw == 0) {
-            const next_name = try name(&current_node.child0, alloc);
-            if (next_name.items.len == 1 ) {
-                try out.append(next_name.items[0]);
-                read_chars += 1;
-                continue;
-            } else {
-                current_node = .{ .parent = current_node.child0.* };
-            }
-        } else {
-            const next_name = try name(&current_node.child1, alloc);
-            if (next_name.items.len == 1 ) {
-                try out.append(next_name.items[0]);
-                read_chars += 1;
-                continue;
-            } else {
-                current_node = .{ .parent = current_node.child1.* };
-            }
-        }
+        const char = try delve(&current_node, bit_reader, alloc);
+        try out.append(char);
+        read_chars += 1;
     }
     return;
 }
