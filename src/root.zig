@@ -294,28 +294,34 @@ fn findMin(arr: []f64) !usize {
     return curr_ind;
 }
 
-fn constructHuffman(probs: *ArrayList(f64), chars:*ArrayList(u8), nchars: usize, alloc: anytype) !*const SourceWord {
+fn constructHuffman(probs:[256]f64, alloc: anytype) !*const SourceWord {
     var wordStructs: ArrayList(*Word) = .empty;
-    // var wordProbs: ArrayList(f64) = .empty;
-    for (chars.items, probs.items) |char, prob| {
-        const pureWord = try alloc.create(PureWord);
-        pureWord.* = .{.name = char, .prob = prob};
-        const resultWord = try alloc.create(Word);
-        resultWord.* = .{.pure = pureWord.*};
-        try wordStructs.append(alloc, resultWord);
+    var wordProbs: ArrayList(f64) = .empty;
+    var nchars: u64 = 0;
+    for (0..256, probs) |char, prob| {
+        if (prob > 0.0) {
+            const pureWord = try alloc.create(PureWord);
+            const char_u8: u8 = @intCast(char);
+            pureWord.* = .{.name = char_u8, .prob = prob};
+            const resultWord = try alloc.create(Word);
+            resultWord.* = .{.pure = pureWord.*};
+            try wordStructs.append(alloc, resultWord);
+            nchars += 1;
+            try wordProbs.append(alloc, prob);
+        }
     }
     var nwords: usize = nchars;
     while (nwords > 2) {
-        const minInd = try findMin(probs.items);
+        const minInd = try findMin(wordProbs.items);
         const minWord = wordStructs.orderedRemove(minInd);
-        const minProb = probs.items[minInd];
-        _ = probs.orderedRemove(minInd);
-        // probs.items[minInd] = -1;
-        const minInd2 = try findMin(probs.items);
+        const minProb = wordProbs.items[minInd];
+        _ = wordProbs.orderedRemove(minInd);
+        // wordProbs.items[minInd] = -1;
+        const minInd2 = try findMin(wordProbs.items);
         const minWord2 = wordStructs.orderedRemove(minInd2);
-        const minProb2 = probs.items[minInd2];
-        _ = probs.orderedRemove(minInd2);
-        // probs.items[minInd2] = -1;
+        const minProb2 = wordProbs.items[minInd2];
+        _ = wordProbs.orderedRemove(minInd2);
+        // wordProbs.items[minInd2] = -1;
         const parentWord = try alloc.create(ParentWord);
         const word_names = try alloc.create(ArrayList(u8));
         word_names.* = .empty;
@@ -323,15 +329,15 @@ fn constructHuffman(probs: *ArrayList(f64), chars:*ArrayList(u8), nchars: usize,
         const resultWord = try alloc.create(Word);
         resultWord.* = .{.parent = parentWord.*};
         try wordStructs.append(alloc,resultWord);
-        try probs.append(alloc, minProb + minProb2);
+        try wordProbs.append(alloc, minProb + minProb2);
         nwords -= 1;
     }
-    const minInd = try findMin(probs.items);
+    const minInd = try findMin(wordProbs.items);
     const minWord = wordStructs.orderedRemove(minInd);
-    _ = probs.orderedRemove(minInd);
-    const minInd2 = try findMin(probs.items);
+    _ = wordProbs.orderedRemove(minInd);
+    const minInd2 = try findMin(wordProbs.items);
     const minWord2 = wordStructs.orderedRemove(minInd2);
-    probs.items[minInd2] = -1;
+    wordProbs.items[minInd2] = -1;
     const source = try alloc.create(SourceWord);
     const word_names = try alloc.create(ArrayList(u8));
     word_names.* = .empty;
@@ -363,14 +369,21 @@ fn appendCharCount(buf_writer:anytype, char:u8, count:u64) !void {
     try buf_writer.writeBits(count, 64);
 }
 
-fn writeHeader(words:ArrayList(u8), counts:ArrayList(u64), fileLength:u64, buf_writer:anytype) !void {
+fn writeHeader(counts:[256]u64, fileLength:u64, buf_writer:anytype) !void {
     // Length of file
     try buf_writer.writeBits(@as(u64, fileLength), 64);
+    var nchars: u64 = 0;
+    for (counts) |count| {
+        if (count > 0) nchars += 1;
+    }
     // Number of characters (Unnecessary?):
-    try buf_writer.writeBits(@as(u64, words.items.len), 64);
+    try buf_writer.writeBits(@as(u64, nchars), 64);
     // Character frequencies:
-    for (words.items, counts.items) |word, count| {
-        try appendCharCount(buf_writer, word, count);
+    for (0.., counts) |word, count| {
+        if (count > 0) {
+            const char_u8:u8 = @intCast(word);
+            try appendCharCount(buf_writer, char_u8, count);
+        }
     }
     // for (words.items, counts.items) |word, count| {
     //     try appendCharCount(buf_writer, word, count);
@@ -395,14 +408,13 @@ fn encode(reader: anytype, words:ArrayList(u8), codes:ArrayList(ArrayList(bool))
     return;
 }
 
-fn readHeader(bit_reader:anytype, words:*ArrayList(u8), counts:*ArrayList(u64), alloc: anytype) !u64 {
+fn readHeader(bit_reader:anytype, counts:*[256]u64) !u64 {
     const fileLength = try bit_reader.*.readBits(u64, 64);
     const num_words = try bit_reader.*.readBits(u64, 64);
     for (0..num_words) |_| {
         const char = try bit_reader.*.readBits(u8, 8);
         const count = try bit_reader.*.readBits(u64, 64);
-        try words.append(alloc, char);
-        try counts.append(alloc, count);
+        counts[char] = count;
     }
     return fileLength;
 }
@@ -513,23 +525,23 @@ pub fn huffmanDecode(init: std.process.Init, input:[]const u8, output:[]const u8
 
     var bit_reader = try BitReader(.little).init(r);
 
-    var chars: ArrayList(u8) = .empty;
-    var counts: ArrayList(u64) = .empty;
-    const fileLength = try readHeader(&bit_reader, &chars, &counts, alloc);
+    // var chars = std.mem.zeroes([256]u8);
+    var counts = std.mem.zeroes([256]u64);
+    const fileLength = try readHeader(&bit_reader, &counts);
     
     var counts_sum: f64 = 0.0;
     var i: usize = 0;
-    const nchars = chars.items.len;
-    while (i < nchars) : (i += 1) {
-        counts_sum += @as(f64, @floatFromInt( counts.items[i]));
+    while (i < 256) : (i += 1) {
+        counts_sum += @as(f64, @floatFromInt( counts[i]));
     }
-    var probs: ArrayList(f64) = .empty;
+    var probs = std.mem.zeroes([256]f64);
     i = 0;
-    while (i < nchars) : (i += 1) {
-        try probs.append(alloc, @as(f64, @floatFromInt( counts.items[i])) / counts_sum);
+    while (i < 256) : (i += 1) {
+        const prob = @as(f64, @floatFromInt( counts[i])) / counts_sum;
+        probs[i] = prob;
     }
 
-    const source = try constructHuffman(&probs, &chars, nchars, alloc);
+    const source = try constructHuffman(probs, alloc);
     var words: ArrayList(u8) = .empty;
     var codes: ArrayList(ArrayList(bool)) = .empty;
     var running_code: ArrayList(bool) = .empty;
@@ -559,8 +571,7 @@ pub fn huffmanEncode(init: std.process.Init, input:[]const u8, output:[]const u8
     // are implementing gzip, then only the compressed bytes should be sent to
     // stdout, not any debugging messages.
     
-    var chars: ArrayList(u8) = .empty;
-    var counts: ArrayList(u64) = .empty;
+    var counts = std.mem.zeroes([256]u64);
     // var counts_test: ArrayList(u8 = undefined;
     var nchars: usize = 0;
 
@@ -578,31 +589,22 @@ pub fn huffmanEncode(init: std.process.Init, input:[]const u8, output:[]const u8
             error.ReadFailed => |e| return e,
         };
         fileLength += 1;
-        const ind = findFirst(char, chars) catch {
-            nchars += 1;
-            try chars.append(alloc, char);
-            try counts.append(alloc, 1);
-            continue;
-        };
-        counts.items[ind] += 1;
+        nchars += 1;
+        counts[char] += 1;
     }
     if (nchars < 2) {
         return TooSmallError.TooSmall;
     }
     var counts_sum: f64 = 0.0;
-    var i: usize = 0;
-    while (i < nchars) : (i += 1) {
-        counts_sum += @as(f64, @floatFromInt( counts.items[i]));
+    for (0..256) |i| {
+        counts_sum += @as(f64, @floatFromInt( counts[i]));
     }
-    // var probs: ArrayList(f64) = .empty;
-    var probs_test: ArrayList(f64) = .empty;
-    i = 0;
-    while (i < nchars) : (i += 1) {
-        const prob = @as(f64, @floatFromInt(counts.items[i])) / counts_sum;
-        try probs_test.append(alloc, prob);
-        // probs_test[i] = @as(f64, @floatFromInt(counts_test[i])) / counts_sum;
+    var probs = std.mem.zeroes([256]f64);
+    for (0..256) |i| {
+        const prob = @as(f64, @floatFromInt(counts[i])) / counts_sum;
+        probs[i] = prob;
     }
-    const source = try constructHuffman(&probs_test, &chars, nchars, alloc);
+    const source = try constructHuffman(probs, alloc);
     var words: ArrayList(u8) = .empty;
     var codes: ArrayList(ArrayList(bool)) = .empty;
     var running_code: ArrayList(bool) = .empty;
@@ -617,7 +619,7 @@ pub fn huffmanEncode(init: std.process.Init, input:[]const u8, output:[]const u8
 
     var bit_writer: BitWriter(.little) = .init(w);
 
-    try writeHeader(chars, counts, fileLength, &bit_writer);
+    try writeHeader(counts, fileLength, &bit_writer);
     try reader.seekTo(0);
     try encode(r, words, codes, &bit_writer);
     try bit_writer.flushBits();
