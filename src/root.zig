@@ -550,12 +550,6 @@ pub fn huffmanDecode(init: std.process.Init, input:[]const u8, output:[]const u8
 
     const source = try constructHuffman(probs, alloc);
     // var words: ArrayList(u8) = .empty;ArrayList(u8) = .empty;
-    var words = std.mem.zeroes([256]bool);
-    var codes = std.mem.zeroes([256][32]bool);
-    var code_length = std.mem.zeroes([256]u32);
-    var running_code = std.mem.zeroes([32]bool);
-    // var codes: ArrayList(ArrayList(bool)) = .empty;
-    try recurseSource(source, &words, &codes, &code_length, &running_code, 0);
     var out: ArrayList(u8) = .empty;
     try readData(&bit_reader, &out, source, fileLength, alloc);
     
