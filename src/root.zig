@@ -160,8 +160,15 @@ pub fn BitReader(comptime endian: std.builtin.Endian) type {
     };
 }
 
+pub const CodingError = error{
+    CodeTooLong
+};
+
 pub fn recursePure(self: *const PureWord, words_done: *[256]bool, codes: *[256][32]bool, code_length: *[256]u32,
-    running_code: *[32]bool, running_code_length: u32) void {
+    running_code: *[32]bool, running_code_length: u32) CodingError!void {
+    if (running_code_length == 32) {
+        return CodingError.CodeTooLong;
+    }
     words_done[self.name] = true;
     for (0..running_code_length) |item| {
         codes[self.name][item] = running_code[item];
@@ -176,7 +183,7 @@ const ParentWord = struct {
 };
 
 pub fn recurseParent(self: *const ParentWord, words_done: *[256]bool, codes: *[256][32]bool, code_length: *[256]u32,
-    running_code: *[32]bool, running_code_length: u32) void {
+    running_code: *[32]bool, running_code_length: u32) CodingError!void {
     var code0 = std.mem.zeroes([32]bool);
     var code0_length: u32 = running_code_length;
     for (0..running_code_length) |item| {
@@ -184,8 +191,10 @@ pub fn recurseParent(self: *const ParentWord, words_done: *[256]bool, codes: *[2
     }
     code0[running_code_length] = false;
     code0_length += 1;
-    std.debug.assert(code0_length <= 32);
-    recurseWord(self.child0, words_done, codes, code_length, &code0, code0_length);
+    if (code0_length == 32) {
+        return CodingError.CodeTooLong;
+    }
+    try recurseWord(self.child0, words_done, codes, code_length, &code0, code0_length);
     var code1 = std.mem.zeroes([32]bool);
     var code1_length: u32 = running_code_length;
     
@@ -194,8 +203,10 @@ pub fn recurseParent(self: *const ParentWord, words_done: *[256]bool, codes: *[2
     }
     code1[running_code_length] = true;
     code1_length += 1;
-    std.debug.assert(code1_length <= 32);
-    recurseWord(self.child1, words_done, codes, code_length, &code1, code1_length);
+    if (code1_length == 32) {
+        return CodingError.CodeTooLong;
+    }
+    try recurseWord(self.child1, words_done, codes, code_length, &code1, code1_length);
 }
 
 const SourceWord = struct {
@@ -205,7 +216,7 @@ const SourceWord = struct {
 };
 
 pub fn recurseSource(self: *const SourceWord, words_done: *[256]bool, codes: *[256][32]bool, code_length: *[256]u32,
-    running_code: *[32]bool, running_code_length: u32) void {
+    running_code: *[32]bool, running_code_length: u32) CodingError!void {
     var code0 = std.mem.zeroes([32]bool);
     var code0_length: u32 = running_code_length;
     for (0..running_code_length) |item| {
@@ -213,7 +224,7 @@ pub fn recurseSource(self: *const SourceWord, words_done: *[256]bool, codes: *[2
     }
     code0[running_code_length] = false;
     code0_length += 1;
-    recurseWord(self.child0, words_done, codes, code_length, &code0, code0_length);
+    try recurseWord(self.child0, words_done, codes, code_length, &code0, code0_length);
     var code1 = std.mem.zeroes([32]bool);
     var code1_length: u32 = running_code_length;
     
@@ -222,16 +233,16 @@ pub fn recurseSource(self: *const SourceWord, words_done: *[256]bool, codes: *[2
     }
     code1[running_code_length] = true;
     code1_length += 1;
-    recurseWord(self.child1, words_done, codes, code_length, &code1, code1_length);
+    try recurseWord(self.child1, words_done, codes, code_length, &code1, code1_length);
 }
 
 pub fn recurseWord(word: *const Word, words_done: *[256]bool, codes: *[256][32]bool, code_length: *[256]u32,
-    running_code: *[32]bool, running_code_length: u32) void {
+    running_code: *[32]bool, running_code_length: u32) !void {
     const actualWord = word.*;
     switch (actualWord) {
-        .pure => |w| recursePure(&w, words_done, codes, code_length, running_code, running_code_length),
-        .parent => |w| recurseParent(&w, words_done, codes, code_length, running_code, running_code_length),
-        .source => |w| recurseSource(&w, words_done, codes, code_length, running_code, running_code_length),
+        .pure => |w| try recursePure(&w, words_done, codes, code_length, running_code, running_code_length),
+        .parent => |w| try recurseParent(&w, words_done, codes, code_length, running_code, running_code_length),
+        .source => |w| try recurseSource(&w, words_done, codes, code_length, running_code, running_code_length),
     }
 }
 
@@ -544,7 +555,7 @@ pub fn huffmanDecode(init: std.process.Init, input:[]const u8, output:[]const u8
     var code_length = std.mem.zeroes([256]u32);
     var running_code = std.mem.zeroes([32]bool);
     // var codes: ArrayList(ArrayList(bool)) = .empty;
-    recurseSource(source, &words, &codes, &code_length, &running_code, 0);
+    try recurseSource(source, &words, &codes, &code_length, &running_code, 0);
     var out: ArrayList(u8) = .empty;
     try readData(&bit_reader, &out, source, fileLength, alloc);
     
@@ -609,7 +620,7 @@ pub fn huffmanEncode(init: std.process.Init, input:[]const u8, output:[]const u8
     var code_length = std.mem.zeroes([256]u32);
     var running_code = std.mem.zeroes([32]bool);
     // var codes: ArrayList(ArrayList(bool)) = .empty;
-    recurseSource(source, &words, &codes, &code_length, &running_code, 0);
+    try recurseSource(source, &words, &codes, &code_length, &running_code, 0);
     const out_file = try std.Io.Dir.cwd().createFile(io, output, .{});
     defer out_file.close(io);
 
