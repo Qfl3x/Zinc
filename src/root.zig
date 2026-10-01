@@ -160,12 +160,13 @@ pub fn BitReader(comptime endian: std.builtin.Endian) type {
     };
 }
 
-pub fn recursePure(self: *const PureWord, words: *ArrayList(u8), codes: *ArrayList(ArrayList(bool)), running_code: *ArrayList(bool), alloc: anytype) std.mem.Allocator.Error!ArrayList(u8) {
-    var words_down: ArrayList(u8) = .empty;
-    try words_down.append(alloc, self.name);
-    try codes.append(alloc, running_code.*);
-    try words.append(alloc, self.name);
-    return words_down;
+pub fn recursePure(self: *const PureWord, words_done: *[256]bool, codes: *[256][32]bool, code_length: *[256]u32,
+    running_code: *[32]bool, running_code_length: u32) void {
+    words_done[self.name] = true;
+    for (0..running_code_length) |item| {
+        codes[self.name][item] = running_code[item];
+    }
+    code_length[self.name] = running_code_length;
 }
 
 const ParentWord = struct {
@@ -174,28 +175,27 @@ const ParentWord = struct {
     name: *ArrayList(u8)
 };
 
-pub fn recurseParent(parent: *const ParentWord, words: *ArrayList(u8), codes: *ArrayList(ArrayList(bool)),
-    running_code: *ArrayList(bool), alloc: anytype) std.mem.Allocator.Error!ArrayList(u8) {
-    var words_down: ArrayList(u8) = .empty;
-    var code0: ArrayList(bool) = .empty;
-    try code0.ensureTotalCapacity(alloc, running_code.items.len + 1);
-    for (running_code.items) |item| {
-        try code0.append(alloc, item);
+pub fn recurseParent(self: *const ParentWord, words_done: *[256]bool, codes: *[256][32]bool, code_length: *[256]u32,
+    running_code: *[32]bool, running_code_length: u32) void {
+    var code0 = std.mem.zeroes([32]bool);
+    var code0_length: u32 = running_code_length;
+    for (0..running_code_length) |item| {
+        code0[item] = running_code[item];
     }
-    try code0.append(alloc, false);
-    const words0 = try recurseWord(parent.child0, words, codes, &code0, alloc);
-    try words_down.appendSlice(alloc, words0.items);
-    var code1: ArrayList(bool) = .empty;
-    try code1.ensureTotalCapacity(alloc, running_code.items.len + 1);
-    for (running_code.items) |item| {
-        try code1.append(alloc, item);
+    code0[running_code_length] = false;
+    code0_length += 1;
+    std.debug.assert(code0_length <= 32);
+    recurseWord(self.child0, words_done, codes, code_length, &code0, code0_length);
+    var code1 = std.mem.zeroes([32]bool);
+    var code1_length: u32 = running_code_length;
+    
+    for (0..running_code_length) |item| {
+        code1[item] = running_code[item];
     }
-    try code1.append(alloc, true);
-    const words1 = try recurseWord(parent.child1, words, codes, &code1, alloc);
-    try words_down.appendSlice(alloc, words1.items);
-    var parent_list = parent.name;
-    try parent_list.appendSlice(alloc, words_down.items);
-    return words_down;
+    code1[running_code_length] = true;
+    code1_length += 1;
+    std.debug.assert(code1_length <= 32);
+    recurseWord(self.child1, words_done, codes, code_length, &code1, code1_length);
 }
 
 const SourceWord = struct {
@@ -204,37 +204,34 @@ const SourceWord = struct {
     name: *ArrayList(u8)
 };
 
-pub fn recurseSource(self: *const SourceWord, words: *ArrayList(u8), codes: *ArrayList(ArrayList(bool)),
-    running_code: *ArrayList(bool), alloc: anytype) std.mem.Allocator.Error!ArrayList(u8) {
-
-    var words_down: ArrayList(u8) = .empty;
-    var code0: ArrayList(bool) = .empty;
-    try code0.ensureTotalCapacity(alloc, running_code.items.len + 1);
+pub fn recurseSource(self: *const SourceWord, words_done: *[256]bool, codes: *[256][32]bool, code_length: *[256]u32,
+    running_code: *[32]bool, running_code_length: u32) void {
+    var code0 = std.mem.zeroes([32]bool);
+    var code0_length: u32 = running_code_length;
+    for (0..running_code_length) |item| {
+        code0[item] = running_code[item];
+    }
+    code0[running_code_length] = false;
+    code0_length += 1;
+    recurseWord(self.child0, words_done, codes, code_length, &code0, code0_length);
+    var code1 = std.mem.zeroes([32]bool);
+    var code1_length: u32 = running_code_length;
     
-    for (running_code.items) |item| {
-        try code0.append(alloc, item);
+    for (0..running_code_length) |item| {
+        code1[item] = running_code[item];
     }
-    try code0.append(alloc, false);
-    const words0 = try recurseWord(self.child0, words, codes, &code0, alloc);
-    try words_down.appendSlice(alloc, words0.items);
-    var code1: ArrayList(bool) = .empty;
-    try code1.ensureTotalCapacity(alloc, running_code.items.len + 1);
-    for (running_code.items) |item| {
-        try code1.append(alloc, item);
-    }
-    try code1.append(alloc, true);
-    const words1 = try recurseWord(self.child1, words, codes, &code1, alloc);
-    try words_down.appendSlice(alloc, words1.items);
-    return words_down;
+    code1[running_code_length] = true;
+    code1_length += 1;
+    recurseWord(self.child1, words_done, codes, code_length, &code1, code1_length);
 }
 
-pub fn recurseWord(word: *const Word, words: *ArrayList(u8), codes: *ArrayList(ArrayList(bool)),
-    running_code: *ArrayList(bool), alloc:anytype) !ArrayList(u8) {
+pub fn recurseWord(word: *const Word, words_done: *[256]bool, codes: *[256][32]bool, code_length: *[256]u32,
+    running_code: *[32]bool, running_code_length: u32) void {
     const actualWord = word.*;
     switch (actualWord) {
-        .pure => |w| return try recursePure(&w, words, codes, running_code, alloc),
-        .parent => |w| return try recurseParent(&w, words, codes, running_code, alloc),
-        .source => |w| return try recurseSource(&w, words, codes, running_code, alloc),
+        .pure => |w| recursePure(&w, words_done, codes, code_length, running_code, running_code_length),
+        .parent => |w| recurseParent(&w, words_done, codes, code_length, running_code, running_code_length),
+        .source => |w| recurseSource(&w, words_done, codes, code_length, running_code, running_code_length),
     }
 }
 
@@ -357,8 +354,9 @@ fn findFirst(needle: u8, words:ArrayList(u8)) !u32 {
     return NotFoundError.NotFound;
 }
 
-fn appendChars(buf_writer:anytype, chars:ArrayList(bool)) !void {
-    for (chars.items) |char| {
+fn appendChars(buf_writer:anytype, chars:[32]bool, length: u32) !void {
+    for (0..length) |item| {
+        const char = chars[item];
         try buf_writer.writeBits(@as(u1, @intFromBool(char)), 1);
     }
     return;
@@ -390,19 +388,18 @@ fn writeHeader(counts:[256]u64, fileLength:u64, buf_writer:anytype) !void {
     // }
 }
 
-fn encode(reader: anytype, words:ArrayList(u8), codes:ArrayList(ArrayList(bool)), 
+fn encode(reader: anytype, codes:[256][32]bool, code_length:[256]u32,
     buf_writer:anytype) !void {
     // var buffer: [4096]u8 = undefined;
-    var index:u32 = 0;
     while (true) {
         const chunk = reader.take(1) catch |err| switch (err) {
             error.EndOfStream => break,
             error.ReadFailed => |e| return e,
         };
         for (chunk) |char| {
-            index = try findFirst(char, words);
-            const code = codes.items[index];
-            try appendChars(buf_writer, code);
+            const code = codes[char];
+            const length = code_length[char];
+            try appendChars(buf_writer, code, length);
         }
     }
     return;
@@ -498,8 +495,7 @@ fn delve(word: *const Word, bit_reader: anytype, alloc: anytype) anyerror!u8 {
     }
 }
 
-fn readData(bit_reader:anytype, out:*ArrayList(u8), _:ArrayList(ArrayList(bool)),
-    _:ArrayList(u8), source:*const SourceWord, fileLength:u64, alloc:std.mem.Allocator) !void {
+fn readData(bit_reader:anytype, out:*ArrayList(u8), source:*const SourceWord, fileLength:u64, alloc:std.mem.Allocator) !void {
     var read_chars: u64 = 0;
     var current_node: Word = .{.source = source.*};
     while (read_chars < fileLength) {
@@ -542,12 +538,15 @@ pub fn huffmanDecode(init: std.process.Init, input:[]const u8, output:[]const u8
     }
 
     const source = try constructHuffman(probs, alloc);
-    var words: ArrayList(u8) = .empty;
-    var codes: ArrayList(ArrayList(bool)) = .empty;
-    var running_code: ArrayList(bool) = .empty;
-    _ = try recurseSource(source, &words, &codes, &running_code, alloc);
+    // var words: ArrayList(u8) = .empty;ArrayList(u8) = .empty;
+    var words = std.mem.zeroes([256]bool);
+    var codes = std.mem.zeroes([256][32]bool);
+    var code_length = std.mem.zeroes([256]u32);
+    var running_code = std.mem.zeroes([32]bool);
+    // var codes: ArrayList(ArrayList(bool)) = .empty;
+    recurseSource(source, &words, &codes, &code_length, &running_code, 0);
     var out: ArrayList(u8) = .empty;
-    try readData(&bit_reader, &out, codes, words, source, fileLength, alloc);
+    try readData(&bit_reader, &out, source, fileLength, alloc);
     
     const out_file = try std.Io.Dir.cwd().createFile(io, output, .{});
     defer out_file.close(io);
@@ -605,10 +604,12 @@ pub fn huffmanEncode(init: std.process.Init, input:[]const u8, output:[]const u8
         probs[i] = prob;
     }
     const source = try constructHuffman(probs, alloc);
-    var words: ArrayList(u8) = .empty;
-    var codes: ArrayList(ArrayList(bool)) = .empty;
-    var running_code: ArrayList(bool) = .empty;
-    _ = try recurseSource(source, &words, &codes, &running_code, alloc);
+    var words = std.mem.zeroes([256]bool);
+    var codes = std.mem.zeroes([256][32]bool);
+    var code_length = std.mem.zeroes([256]u32);
+    var running_code = std.mem.zeroes([32]bool);
+    // var codes: ArrayList(ArrayList(bool)) = .empty;
+    recurseSource(source, &words, &codes, &code_length, &running_code, 0);
     const out_file = try std.Io.Dir.cwd().createFile(io, output, .{});
     defer out_file.close(io);
 
@@ -621,7 +622,7 @@ pub fn huffmanEncode(init: std.process.Init, input:[]const u8, output:[]const u8
 
     try writeHeader(counts, fileLength, &bit_writer);
     try reader.seekTo(0);
-    try encode(r, words, codes, &bit_writer);
+    try encode(r, codes, code_length, &bit_writer);
     try bit_writer.flushBits();
     try w.flush();}
 
