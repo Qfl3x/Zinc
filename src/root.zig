@@ -166,7 +166,7 @@ pub const CodingError = error{
 
 pub fn recursePure(self: *const PureWord, words_done: *[256]bool, codes: *[256][32]bool, code_length: *[256]u32,
     running_code: *[32]bool, running_code_length: u32) CodingError!void {
-    if (running_code_length == 32) {
+    if (running_code_length > 32) {
         return CodingError.CodeTooLong;
     }
     words_done[self.name] = true;
@@ -189,23 +189,19 @@ pub fn recurseParent(self: *const ParentWord, words_done: *[256]bool, codes: *[2
     for (0..running_code_length) |item| {
         code0[item] = running_code[item];
     }
-    code0[running_code_length] = false;
-    code0_length += 1;
-    if (code0_length == 32) {
+    if (running_code_length == 32) {
         return CodingError.CodeTooLong;
     }
+    code0[running_code_length] = false;
+    code0_length += 1;
     try recurseWord(self.child0, words_done, codes, code_length, &code0, code0_length);
     var code1 = std.mem.zeroes([32]bool);
     var code1_length: u32 = running_code_length;
-    
     for (0..running_code_length) |item| {
         code1[item] = running_code[item];
     }
     code1[running_code_length] = true;
     code1_length += 1;
-    if (code1_length == 32) {
-        return CodingError.CodeTooLong;
-    }
     try recurseWord(self.child1, words_done, codes, code_length, &code1, code1_length);
 }
 
