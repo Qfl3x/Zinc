@@ -445,7 +445,6 @@ fn delve(word: *const Word, bit_reader: anytype) std.Io.Reader.Error!u8 {
         }
         return err;
     };
-    std.debug.print("   Current bit: {any}\n", .{value_raw});
     switch (actualWord) {
         .pure =>  |w| return delvePure(&w),
         .parent => |w| return delveParent(&w, value_raw, bit_reader),
@@ -453,13 +452,12 @@ fn delve(word: *const Word, bit_reader: anytype) std.Io.Reader.Error!u8 {
     }
 }
 
-fn readData(bit_reader:anytype, out:*ArrayList(u8), source:*const SourceWord, fileLength:u64, alloc:std.mem.Allocator) !void {
+fn readData(bit_reader:anytype, source:*const SourceWord, fileLength:u64, w:anytype) !void {
     var read_chars: u64 = 0;
     var current_node: Word = .{.source = source.*};
     while (read_chars < fileLength) {
         const char = try delve(&current_node, bit_reader);
-        std.debug.print("Read Char: {c}\n", .{char});
-        try out.append(alloc, char);
+        try w.writeByte(char);
         read_chars += 1;
     }
     return;
@@ -504,13 +502,6 @@ pub fn huffmanDecode(init: std.process.Init, input:[]const u8, output:[]const u8
     var running_code = std.mem.zeroes([32]bool);
     // var codes: ArrayList(ArrayList(bool)) = .empty;
     try recurseSource(source, &words, &codes, &code_length, &running_code, 0);
-    for (0..256) |char| {
-        if (words[char] == true) {
-            std.debug.print("Character: {c} -> Code: {any}\n", .{@as(u8, @intCast(char)), codes[char][0..code_length[char]]});
-        }
-    }
-    var out: ArrayList(u8) = .empty;
-    try readData(&bit_reader, &out, source, fileLength, alloc);
     
     const out_file = try std.Io.Dir.cwd().createFile(io, output, .{});
     defer out_file.close(io);
@@ -518,7 +509,7 @@ pub fn huffmanDecode(init: std.process.Init, input:[]const u8, output:[]const u8
     var writebuffer: [1024]u8 = undefined;
     var writer = out_file.writer(io, &writebuffer);
     var w = &writer.interface;
-    try w.writeAll(out.items);
+    try readData(&bit_reader, source, fileLength, w);
     try w.flush();
 }
 
