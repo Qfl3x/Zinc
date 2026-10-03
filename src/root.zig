@@ -311,16 +311,6 @@ fn constructHuffman(probs:[256]f64, alloc: anytype) !*const SourceWord {
 }
 const NotFoundError = error{NotFound};
 const TooSmallError = error{TooSmall};
-fn findFirst(needle: u8, words:ArrayList(u8)) !u32 {
-    var i:u32 = 0;
-    for (words.items) |word| {
-        if (word == needle) {
-            return i;
-        }
-        i = i + 1;
-    }
-    return NotFoundError.NotFound;
-}
 
 fn appendChars(buf_writer:anytype, chars:[32]bool, length: u32) !void {
     for (0..length) |item| {
@@ -382,26 +372,6 @@ fn readHeader(bit_reader:anytype, counts:*[256]u64) !u64 {
         counts[char] = count;
     }
     return fileLength;
-}
-
-fn isEqual(arr1:ArrayList(bool), arr2:ArrayList(bool)) bool {
-    if (arr1.items.len != arr2.items.len) {
-        return false;
-    }
-    for (arr1.items, arr2.items) |item1, item2| {
-        if (item1 != item2) {
-            return false;
-        }
-    }
-    return true;
-}
-fn isPresent(code:ArrayList(bool), codes:ArrayList(ArrayList(bool))) !usize {
-    for (codes.items, 0..) |prospective_code, index| {
-        if (isEqual(code, prospective_code)) {
-            return index;
-        }
-    }
-    return NotFoundError.NotFound;
 }
 
 fn delvePure(word: *const PureWord) u8 {
