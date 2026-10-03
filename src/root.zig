@@ -179,7 +179,7 @@ pub fn recursePure(self: *const PureWord, words_done: *[256]bool, codes: *[256][
 const ParentWord = struct {
     child0: *const Word,
     child1: *const Word,
-    name: *ArrayList(u8)
+    name: u8
 };
 
 pub fn recurseParent(self: *const ParentWord, words_done: *[256]bool, codes: *[256][32]bool, code_length: *[256]u32,
@@ -208,7 +208,7 @@ pub fn recurseParent(self: *const ParentWord, words_done: *[256]bool, codes: *[2
 const SourceWord = struct {
     child0: *const Word,
     child1: *const Word,
-    name: *ArrayList(u8)
+    name: u8
 };
 
 pub fn recurseSource(self: *const SourceWord, words_done: *[256]bool, codes: *[256][32]bool, code_length: *[256]u32,
@@ -242,43 +242,8 @@ pub fn recurseWord(word: *const Word, words_done: *[256]bool, codes: *[256][32]b
     }
 }
 
-pub fn name(word: *const Word, alloc:anytype) !ArrayList(u8) {
-    const actualWord = word.*;
-    switch (actualWord) {
-        .pure => |w| { 
-            var array: ArrayList(u8) = .empty;
-            try array.append(alloc, w.name);
-            return array;
-        },
-        .parent => |w| return w.name.*,
-        .source => |w| return w.name.*,
-    }
-}
-
-pub fn getWord(word: *const Word) !Word {
-    const actualWord = word.*;
-    switch (actualWord) {
-        .pure => |w| return .{ .pure = w },
-        .parent => |w| return .{ .parent = w },
-        .source => |w| return .{ .source = w },
-    }
-}
-const ReturnTuple = std.meta.Tuple(&.{bool, usize});
-fn inArray(char: u8, array: ArrayList(u8)) ReturnTuple {
-    for (array.items, 0..) |c, index| {
-        if (c == char) {
-            return .{
-                @as(bool, true),
-                @as(usize, index)
-            };
-        }
-    }
-    return .{
-        @as(bool, false),
-        @as(usize, 0)
-    };
-}
 const NoneFoundError = error{NoneFound};
+
 fn findMin(arr: []f64) !usize {
     const size = arr.len;
     var curr:f64 = 100;
@@ -327,9 +292,7 @@ fn constructHuffman(probs:[256]f64, alloc: anytype) !*const SourceWord {
         _ = wordProbs.orderedRemove(minInd2);
         // wordProbs.items[minInd2] = -1;
         const parentWord = try alloc.create(ParentWord);
-        const word_names = try alloc.create(ArrayList(u8));
-        word_names.* = .empty;
-        parentWord.* = .{.child0 = &minWord.*, .child1 = &minWord2.*, .name = word_names};
+        parentWord.* = .{.child0 = &minWord.*, .child1 = &minWord2.*, .name = 0};
         const resultWord = try alloc.create(Word);
         resultWord.* = .{.parent = parentWord.*};
         try wordStructs.append(alloc,resultWord);
@@ -343,9 +306,7 @@ fn constructHuffman(probs:[256]f64, alloc: anytype) !*const SourceWord {
     const minWord2 = wordStructs.orderedRemove(minInd2);
     wordProbs.items[minInd2] = -1;
     const source = try alloc.create(SourceWord);
-    const word_names = try alloc.create(ArrayList(u8));
-    word_names.* = .empty;
-    source.* = .{.child0 = &minWord.*, .child1 = &minWord2.*, .name = word_names};
+    source.* = .{.child0 = &minWord.*, .child1 = &minWord2.*, .name = 1};
     return source;
 }
 const NotFoundError = error{NotFound};
@@ -443,62 +404,52 @@ fn isPresent(code:ArrayList(bool), codes:ArrayList(ArrayList(bool))) !usize {
     return NotFoundError.NotFound;
 }
 
-fn delveParent(word: *const ParentWord, value_raw: u1, bit_reader: anytype, alloc: anytype) !u8 {
+fn delvePure(word: *const PureWord) u8 {
+    return word.name;
+}
+
+fn delveParent(word: *const ParentWord, value_raw: u1, bit_reader: anytype) !u8 {
     if (value_raw == 0) {
-        const next_name = try name(word.child0, alloc);
-        if (next_name.items.len == 1 ) {
-            return next_name.items[0];
-        } else {
-            const new_word: Word = word.child0.*;
-            return delve(&new_word, bit_reader, alloc);
-        }
+        const new_word: Word = word.child0.*;
+        return delve(&new_word, bit_reader);
     } else {
-        const next_name = try name(word.child1, alloc);
-        if (next_name.items.len == 1 ) {
-            return next_name.items[0];
-        } else {
-            const new_word: Word = word.child1.*;
-            return delve(&new_word, bit_reader, alloc);
-        }
+        const new_word: Word = word.child1.*;
+        return delve(&new_word, bit_reader);
     }
 }
 
-fn delveSource(word: *const SourceWord, value_raw: u1, bit_reader: anytype, alloc: anytype) !u8 {
+fn delveSource(word: *const SourceWord, value_raw: u1, bit_reader: anytype) !u8 {
     if (value_raw == 0) {
-        const next_name = try name(word.child0, alloc);
-        if (next_name.items.len == 1 ) {
-            return next_name.items[0];
-        } else {
-            const new_word: Word = word.child0.*;
-            return delve(&new_word, bit_reader, alloc);
-        }
+        const new_word: Word = word.child0.*;
+        return delve(&new_word, bit_reader);
     } else {
-        const next_name = try name(word.child1, alloc);
-        if (next_name.items.len == 1 ) {
-            return next_name.items[0];
-        } else {
-            const new_word: Word = word.child1.*;
-            return delve(&new_word, bit_reader, alloc);
-        }
+        const new_word: Word = word.child1.*;
+        return delve(&new_word, bit_reader);
     }
 }
-fn delve(word: *const Word, bit_reader: anytype, alloc: anytype) anyerror!u8 {
+
+fn delve(word: *const Word, bit_reader: anytype) std.Io.Reader.Error!u8 {
+    const actualWord = word.*;
+    switch (actualWord) {
+        .pure =>  |w| return delvePure(&w,),
+        .parent => {},
+        .source => {},
+    }
     const value_raw = bit_reader.*.readBits(u1, 1) catch |err| {
         if (err == error.EndOfStream) {
-            const curr_name = try name(word, alloc);
-            if (curr_name.items.len != 0) {
-                return 1;
-            } else {
-                return 0;
+            switch (actualWord) {
+                .pure =>  unreachable,
+                .parent => return 1,
+                .source => return 1,
             }
         }
         return err;
     };
-    const actualWord = word.*;
+    std.debug.print("   Current bit: {any}\n", .{value_raw});
     switch (actualWord) {
-        .pure =>  return NotFoundError.NotFound,
-        .parent => |w| return delveParent(&w, value_raw, bit_reader, alloc),
-        .source => |w| return delveSource(&w, value_raw, bit_reader, alloc),
+        .pure =>  |w| return delvePure(&w),
+        .parent => |w| return delveParent(&w, value_raw, bit_reader),
+        .source => |w| return delveSource(&w, value_raw, bit_reader),
     }
 }
 
@@ -506,7 +457,8 @@ fn readData(bit_reader:anytype, out:*ArrayList(u8), source:*const SourceWord, fi
     var read_chars: u64 = 0;
     var current_node: Word = .{.source = source.*};
     while (read_chars < fileLength) {
-        const char = try delve(&current_node, bit_reader, alloc);
+        const char = try delve(&current_node, bit_reader);
+        std.debug.print("Read Char: {c}\n", .{char});
         try out.append(alloc, char);
         read_chars += 1;
     }
@@ -546,6 +498,17 @@ pub fn huffmanDecode(init: std.process.Init, input:[]const u8, output:[]const u8
 
     const source = try constructHuffman(probs, alloc);
     // var words: ArrayList(u8) = .empty;ArrayList(u8) = .empty;
+    var words = std.mem.zeroes([256]bool);
+    var codes = std.mem.zeroes([256][32]bool);
+    var code_length = std.mem.zeroes([256]u32);
+    var running_code = std.mem.zeroes([32]bool);
+    // var codes: ArrayList(ArrayList(bool)) = .empty;
+    try recurseSource(source, &words, &codes, &code_length, &running_code, 0);
+    for (0..256) |char| {
+        if (words[char] == true) {
+            std.debug.print("Character: {c} -> Code: {any}\n", .{@as(u8, @intCast(char)), codes[char][0..code_length[char]]});
+        }
+    }
     var out: ArrayList(u8) = .empty;
     try readData(&bit_reader, &out, source, fileLength, alloc);
     
